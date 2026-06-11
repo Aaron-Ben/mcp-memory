@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mcp_memory.adapters import (
@@ -9,10 +11,12 @@ from mcp_memory.adapters import (
 from mcp_memory.config import settings
 from mcp_memory.extractors import L1Extractor, PromptL1Extractor
 from mcp_memory.repositories.memory_items import memory_item_repository
-from mcp_memory.schemas import L0MemoryRow, L0ToL1Result
-from mcp_memory.services import EmbeddingProvider, l1_memory_service
+from mcp_memory.schemas import L0MemoryRow, L0ToL1Result, L1MemoryExtracted
+from mcp_memory.services.l1_memory import EmbeddingProvider, l1_memory_service
 
 __all__ = ["L0ToL1Pipeline", "create_l0_to_l1_pipeline_from_settings"]
+
+logger = logging.getLogger(__name__)
 
 
 class L0ToL1Pipeline:
@@ -43,6 +47,14 @@ class L0ToL1Pipeline:
         previous_scene_name: str | None = None,
         query_limit: int = 500,
     ) -> L0ToL1Result:
+        query_limit = max(query_limit, self.max_new_messages * 2)
+        logger.info(
+            "[L0->L1] 开始查询 L0: user_id=%s session=%s after_cursor=%s limit=%s",
+            user_id,
+            source_session_key,
+            after_timestamp_ms,
+            query_limit,
+        )
         rows = await memory_item_repository.query_l0_for_l1(
             db,
             user_id=user_id,
@@ -51,9 +63,25 @@ class L0ToL1Pipeline:
             limit=query_limit,
         )
         if not rows:
-            return L0ToL1Result(input_count=0, extracted_count=0, stored_count=0)
+            logger.info("[L0->L1] 没有待处理 L0: user_id=%s session=%s", user_id, source_session_key)
+            return L0ToL1Result(input_count=0, processed_count=0, extracted_count=0, stored_count=0)
 
-        background_messages, new_messages = self._split_rows(rows)
+        processed_rows = self._slice_process_rows(rows)
+        has_unprocessed = len(rows) > len(processed_rows)
+        has_full_backlog = len(rows) >= query_limit and has_unprocessed
+        has_more = has_unprocessed
+        latest_cursor = max((row.timestamp_ms for row in processed_rows), default=None)
+        logger.info(
+            "[L0->L1] 准备抽取 L1: user_id=%s session=%s queried=%s processed=%s latest_cursor=%s has_more=%s",
+            user_id,
+            source_session_key,
+            len(rows),
+            len(processed_rows),
+            latest_cursor,
+            has_more,
+        )
+
+        background_messages, new_messages = self._split_rows(processed_rows)
         extracted = await self.extractor.extract(
             new_messages=new_messages,
             background_messages=background_messages,
@@ -61,6 +89,12 @@ class L0ToL1Pipeline:
         )
         if self.max_memories_per_run > 0:
             extracted = extracted[: self.max_memories_per_run]
+        logger.info(
+            "[L0->L1] LLM 抽取完成: user_id=%s session=%s extracted=%s",
+            user_id,
+            source_session_key,
+            len(extracted),
+        )
 
         stored_ids: list[str] = []
         for memory in extracted:
@@ -75,13 +109,34 @@ class L0ToL1Pipeline:
                 embedding_provider=self.embedding_provider,
             )
             stored_ids.append(memory_id)
+        logger.info(
+            "[L0->L1] L1 写入完成: user_id=%s session=%s stored=%s memory_ids=%s",
+            user_id,
+            source_session_key,
+            len(stored_ids),
+            stored_ids,
+        )
 
         return L0ToL1Result(
             input_count=len(rows),
+            processed_count=len(processed_rows),
             extracted_count=len(extracted),
             stored_count=len(stored_ids),
+            latest_cursor=latest_cursor,
+            last_scene_name=self._last_scene_name(extracted),
+            has_more=has_more,
+            has_full_backlog=has_full_backlog,
             memory_ids=stored_ids,
         )
+
+    def _slice_process_rows(self, rows: list[L0MemoryRow]) -> list[L0MemoryRow]:
+        if self.max_new_messages <= 0 or len(rows) <= self.max_new_messages:
+            return rows
+        slice_end = self.max_new_messages
+        boundary_ms = rows[slice_end - 1].timestamp_ms
+        while slice_end < len(rows) and rows[slice_end].timestamp_ms == boundary_ms:
+            slice_end += 1
+        return rows[:slice_end]
 
     def _split_rows(self, rows: list[L0MemoryRow]) -> tuple[list[L0MemoryRow], list[L0MemoryRow]]:
         new_messages = rows[-self.max_new_messages :] if self.max_new_messages > 0 else rows
@@ -110,6 +165,12 @@ class L0ToL1Pipeline:
         if not rows:
             return ""
         return rows[0].source_conversation_id
+
+    def _last_scene_name(self, memories: list[L1MemoryExtracted]) -> str | None:
+        for memory in reversed(memories):
+            if memory.scene_name:
+                return memory.scene_name
+        return None
 
 
 def create_l0_to_l1_pipeline_from_settings() -> L0ToL1Pipeline | None:

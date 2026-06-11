@@ -43,6 +43,7 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
     pgsql = _as_dict(memory.get("pgsql"))
     capture = _as_dict(memory.get("capture"))
     extraction = _as_dict(memory.get("extraction"))
+    pipeline = _as_dict(memory.get("pipeline"))
     embedding = _as_dict(memory.get("embedding"))
 
     values: dict[str, Any] = {}
@@ -67,6 +68,9 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
     _set_if_present(values, "MEMORY_EXTRACTION_ENABLED", extraction.get("enabled"))
     _set_if_present(values, "MEMORY_ENABLE_DEDUP", extraction.get("enableDedup"))
     _set_if_present(values, "MEMORY_MAX_MEMORIES_PER_SESSION", extraction.get("maxMemoriesPerSession"))
+    _set_if_present(values, "PIPELINE_EVERY_N_CONVERSATIONS", pipeline.get("everyNConversations"))
+    _set_if_present(values, "PIPELINE_ENABLE_WARMUP", pipeline.get("enableWarmup"))
+    _set_if_present(values, "PIPELINE_L1_IDLE_TIMEOUT_SECONDS", pipeline.get("l1IdleTimeoutSeconds"))
 
     _set_if_present(values, "EMBEDDING_ENABLED", embedding.get("enabled"))
     _set_if_present(values, "EMBEDDING_API_KEY", embedding.get("apiKey"))
@@ -105,6 +109,9 @@ class Settings(BaseModel):
     MEMORY_EXTRACTION_ENABLED: bool = True
     MEMORY_ENABLE_DEDUP: bool = True
     MEMORY_MAX_MEMORIES_PER_SESSION: int = 20
+    PIPELINE_EVERY_N_CONVERSATIONS: int = 5
+    PIPELINE_ENABLE_WARMUP: bool = True
+    PIPELINE_L1_IDLE_TIMEOUT_SECONDS: int = 600
 
     EMBEDDING_ENABLED: bool = True
     EMBEDDING_API_KEY: str | None = None

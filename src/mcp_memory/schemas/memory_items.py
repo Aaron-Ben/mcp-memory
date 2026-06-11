@@ -97,6 +97,11 @@ class L0ToL1Result(BaseModel):
     """Result of one L0 to L1 pipeline run."""
 
     input_count: int
+    processed_count: int = 0
     extracted_count: int
     stored_count: int
+    latest_cursor: int | None = None
+    last_scene_name: str | None = None
+    has_more: bool = False
+    has_full_backlog: bool = False
     memory_ids: list[str] = Field(default_factory=list)

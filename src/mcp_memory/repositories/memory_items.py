@@ -155,7 +155,10 @@ class MemoryItemRepository:
                     metadata, status, created_at, updated_at
                 ) VALUES (
                     :memory_id, :user_id, 1, :memory_type, :content,
-                    CASE WHEN :embedding_text IS NULL THEN NULL ELSE CAST(:embedding_text AS vector) END,
+                    CASE
+                        WHEN CAST(:embedding_text AS text) IS NULL THEN NULL
+                        ELSE CAST(CAST(:embedding_text AS text) AS vector)
+                    END,
                     :priority, :scene_name, :source_conversation_id, :source_session_key,
                     CAST(:metadata_json AS jsonb), 'active', :created_at, :updated_at
                 )

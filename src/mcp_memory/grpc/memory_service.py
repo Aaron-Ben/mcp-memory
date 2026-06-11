@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -8,9 +9,11 @@ import grpc
 from mcp_memory.db import async_db_session
 from mcp_memory.proto import memory_pb2, memory_pb2_grpc
 from mcp_memory.schemas import L0MessageCreate
-from mcp_memory.services import l0_memory_service
+from mcp_memory.services import l0_memory_service, pipeline_scheduler
 
 __all__ = ["MemoryService"]
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryService(memory_pb2_grpc.MemoryServicer):
@@ -35,11 +38,14 @@ class MemoryService(memory_pb2_grpc.MemoryServicer):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "messages are required")
 
         source_session_key = self._build_session_key(user_id, conversation_id)
+        user_rounds = 0
         async with async_db_session() as db:
             for index, message in enumerate(request.messages):
                 normalized = self._normalize_message(message, index)
                 if not normalized["content"] and normalized["role"] != "assistant":
                     continue
+                if normalized["role"] == "user":
+                    user_rounds += 1
                 await l0_memory_service.save_message(
                     db,
                     obj_in=L0MessageCreate(
@@ -53,6 +59,27 @@ class MemoryService(memory_pb2_grpc.MemoryServicer):
                         metadata=normalized["metadata"],
                     ),
                 )
+
+        if user_rounds > 0:
+            logger.info(
+                "[L0->L1] IngestMessages 已保存 L0，通知调度器: user=%s conversation=%s session=%s user_rounds=%s",
+                user_id,
+                conversation_id,
+                source_session_key,
+                user_rounds,
+            )
+            await pipeline_scheduler.notify_conversation(
+                user_id=user_id,
+                source_session_key=source_session_key,
+                rounds=user_rounds,
+            )
+        else:
+            logger.info(
+                "[L0->L1] IngestMessages 已保存 L0，但无 user 消息，不触发 L1: user=%s conversation=%s session=%s",
+                user_id,
+                conversation_id,
+                source_session_key,
+            )
 
         return memory_pb2.IngestReply(accepted=True)
 

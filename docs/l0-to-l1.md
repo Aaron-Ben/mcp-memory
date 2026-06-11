@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-`mcp-memory` 目前只实现了 L0 保存，还没有实现 L0 -> L1 抽取流程。
+`mcp-memory` 目前已实现 L0 保存，以及一个最小 L0 -> L1 自动触发闭环。
 
 当前已实现链路：
 
@@ -13,6 +13,10 @@ mcp-client
   -> mcp_memory.services.l0_memory.L0MemoryService
   -> mcp_memory.repositories.memory_items.MemoryItemRepository.upsert_l0
   -> memory_items(layer = 0)
+  -> mcp_memory.services.pipeline_scheduler.PipelineScheduler.notify_conversation
+  -> pipeline_state 记录 conversation_count / warmup_threshold / last_l1_cursor
+  -> mcp_memory.pipelines.l0_to_l1.L0ToL1Pipeline
+  -> memory_items(layer = 1)
 ```
 
 L0 保存当前做的事：
@@ -24,13 +28,21 @@ L0 保存当前做的事：
 - 写入 `memory_items`，其中 `layer = 0`。
 - 在 `metadata` 中记录 `_role`、`_session_key`、`message_ts_ms`、`recorded_at`。
 
-也就是说，当前 `mcp-memory` 还没有：
+当前已补充：
 
 - L1 抽取器。
-- L1 去重逻辑。
 - L1 写入 repository。
-- 后台 pipeline / worker。
-- L0 已处理进度记录。
+- 后台 in-process scheduler。
+- L0 已处理进度记录：`pipeline_state.last_l1_cursor`。
+- warmup/阈值触发与 idle timer。
+
+当前还没有：
+
+- L1 去重逻辑。
+- 相似 L1 向量召回 / FTS 召回。
+- `update` / `merge` / `skip` 决策。
+- 旧 L1 归档删除。
+- 分布式 worker / 多进程任务队列。
 
 ## yuanxi-memory 参考流程
 
@@ -237,7 +249,7 @@ deleted_at = now
 
 `mcp-memory` 应保持 PGSQL 单表模型：L0/L1/L2/L3 都写入 `memory_items`，用 `layer` 区分。
 
-建议新增目录：
+当前相关目录：
 
 ```text
 src/mcp_memory/
@@ -255,20 +267,39 @@ src/mcp_memory/
 │       ├── l1_extraction_system.md
 │       └── l1_extraction_user.md
 └── repositories/
-    └── memory_items.py
+    ├── memory_items.py
+    └── pipeline_state.py
 ```
 
-建议调用链：
+当前调用链：
 
 ```text
 MemoryService.IngestMessages
   -> L0MemoryService.save_message
-  -> enqueue_l0_to_l1_job
-  -> L0ToL1Pipeline.run(job)
+  -> PipelineScheduler.notify_conversation
+  -> PipelineStateRepository.notify_conversation
+  -> background task: L0ToL1Pipeline.run
   -> MemoryItemRepository.query_l0_for_l1
   -> L1Extractor.extract
-  -> L1DedupService.dedup
   -> MemoryItemRepository.upsert_l1
+  -> PipelineStateRepository.mark_l1_complete
+```
+
+### 当前 L1 触发规则
+
+- `pipeline_state.conversation_count` 记录本 session 尚未处理的 user round。
+- 开启 warmup 时，阈值按 `1 -> 2 -> 4 -> everyNConversations` 递增。
+- 达到阈值时，`PipelineScheduler` 立即用后台 task 跑 L1。
+- 未达到阈值时，重置 idle timer；超过 `memory.pipeline.l1IdleTimeoutSeconds` 后触发 L1。
+- L1 成功后更新 `last_l1_cursor` 和 `last_scene_name`，并清零 `conversation_count`。
+- 如果本轮 L0 查询还有 backlog，会继续调度下一轮 L1。
+
+### 迁移
+
+L0->L1 调度需要 `pipeline_state` 表。执行：
+
+```bash
+alembic upgrade head
 ```
 
 ### 建议的 pipeline 边界
