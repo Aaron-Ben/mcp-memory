@@ -190,13 +190,13 @@ result = some_function()  # type: ignore
 
 ```bash
 # 检查整个项目
-mypy app/
+mypy src/mcp_memory/
 
 # 检查单个文件
-mypy app/core/services/balance/balance_service.py
+mypy src/mcp_memory/services/recall.py
 
 # 使用项目配置
-mypy --config-file=pyproject.toml app/
+mypy --config-file=pyproject.toml src/mcp_memory/
 ```
 
 ### 异常处理规范

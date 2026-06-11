@@ -93,7 +93,7 @@ async def create(self, db: AsyncSession, data: dict) -> ServiceResult:
 
 ## 全局异常处理器
 
-位于 `app/api/exceptions.py`，已注册以下处理器：
+如果实现 HTTP API，全局异常处理器应位于 `mcp_memory/api/` 内，并注册以下处理器：
 
 | 处理器 | 异常类型 | 说明 |
 |--------|----------|------|
@@ -104,19 +104,18 @@ async def create(self, db: AsyncSession, data: dict) -> ServiceResult:
 ### 异常处理流程
 
 ```
-请求 → Router → Service → CRUD/外部服务
-                  ↓
-            发生异常？
-           ↙        ↘
-         是          否
-          ↓           ↓
-    业务异常？    返回成功结果
-   ↙        ↘
-  是         否
-   ↓          ↓
-返回失败    冒泡到全局处理器
-ServiceResult  → 记录日志 + 上报 Sentry
-               → 返回 500 错误
+请求/MCP 调用 → Adapter → Service/Pipeline → Repository/外部服务
+                              ↓
+                        发生异常？
+                       ↙        ↘
+                     是          否
+                      ↓           ↓
+                业务异常？    返回成功结果
+               ↙        ↘
+              是         否
+               ↓          ↓
+        返回失败结果    冒泡到全局处理器或 runner
+        ServiceResult   → 记录日志和 trace
 ```
 
 ## ServiceResult 规范

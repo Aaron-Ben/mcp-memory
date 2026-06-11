@@ -1,5 +1,7 @@
 # 数据库规范
 
+本文件定义通用 SQLAlchemy 和迁移规则。memory 专属存储规则见 [pgsql-storage.md](pgsql-storage.md)。
+
 ## 时间字段规范
 
 ### 统一使用 DateTime 类型
@@ -8,7 +10,7 @@
 
 ```python
 from sqlalchemy import Column, DateTime
-from app.core.models.base import BaseModel, get_china_time
+from mcp_memory.models.base import BaseModel, get_china_time
 
 class MyModel(BaseModel):
     # ✅ 正确：使用 DateTime 类型
@@ -90,23 +92,30 @@ def upgrade() -> None:
 
 ### 新增模型必须注册到 `__init__.py`
 
-新建 ORM 模型文件后，**必须**在 `app/core/models/__init__.py` 中导入并加入 `__all__`。
+新建 ORM 模型文件后，**必须**在 `mcp_memory/models/__init__.py` 中导入并加入 `__all__`。
 
-`autogenerate` 通过 `Base.metadata` 感知模型，而模型只有被导入后才会注册到 `Base.metadata`。`migrations/env.py` 仅靠 `import app.core.models` 触发 `__init__.py` 完成注册——**未导入的模型不在 metadata 中**。
+`autogenerate` 通过 `Base.metadata` 感知模型，而模型只有被导入后才会注册到 `Base.metadata`。迁移入口应通过 `import mcp_memory.models` 触发 `__init__.py` 完成注册。未导入的模型不在 metadata 中。
 
 后果：漏注册的模型会被 `autogenerate` 当成"数据库里多余的表"，生成 `drop_table`。若未察觉直接 `upgrade`，**线上表和数据会被删除**。
 
 ```python
-# 新增 app/core/models/subscription.py 后，必须补全 __init__.py：
-from .subscription import Subscription   # 1. 导入
+# 新增 mcp_memory/models/switch.py 后，必须补全 __init__.py：
+from .switch import Switch   # 1. 导入
 
 __all__ = [
     ...
-    "Subscription",                       # 2. 加入 __all__
+    "Switch",             # 2. 加入 __all__
 ]
 ```
 
-> **检查信号**：若 `autogenerate` 生成的迁移里出现 `op.drop_table(...)` 删的是仍在使用的表，几乎都是模型漏注册，先排查 `__init__.py`，**不要执行该迁移**。
+> **检查信号**：若 `autogenerate` 生成的迁移里出现 `op.drop_table(...)` 删的是仍在使用的表，先排查 `__init__.py`，不要执行该迁移。
+
+## Memory 表通用要求
+
+- `memory_items` 查询默认过滤 `is_deleted IS FALSE`。
+- 涉及用户数据的查询必须过滤 `user_id`。
+- JSONB 字段用于扩展信息，不能替代高频查询列。
+- pgvector 维度变更必须通过显式迁移处理。
 
 ## 布尔字段查询规范
 

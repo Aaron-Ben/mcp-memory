@@ -31,13 +31,13 @@ result = async_method()
 
 ## 异步 I/O 规范
 
-所有文件 I/O 操作**必须**使用异步方式，禁止使用同步的 `open()` 函数：
+异步请求路径、MCP tool 执行路径和 worker 热路径禁止使用阻塞文件 I/O。
 
 ### 基本要求
 
-- 使用 `aiofiles` 库进行异步文件操作
-- 所有 `with open()` 必须改为 `async with aiofiles.open()`
-- 所有 `f.read()` / `f.write()` 必须改为 `await f.read()` / `await f.write()`
+- 异步服务路径使用 `aiofiles` 进行文件操作。
+- `async def` 中读取大文件、写文件、删除文件时使用异步 I/O。
+- 启动期配置读取、迁移脚本、小型 CLI 可以使用同步文件 I/O，但不能出现在高频异步请求路径。
 
 ### 正确示例
 
@@ -119,6 +119,6 @@ async with aiofiles.open("data.json", "w", encoding="utf-8") as f:
 - 同一类中方法的异步风格不一致（部分 `async def`，部分普通 `def`）
 - 调用异步方法时遗漏 `await` 关键字
 - 在同步上下文中错误地调用异步方法
-- **在异步方法中使用同步的 `open()` 函数**（应使用 `aiofiles.open()`）
-- **在异步方法中使用同步的文件读写操作**（应使用 `await f.read()` / `await f.write()`）
-- **在异步方法中使用同步的文件系统操作**（如 `os.remove()`，应使用 `aiofiles.os.remove()`）
+- 在异步请求路径中使用同步的 `open()` 函数
+- 在异步请求路径中执行大文件同步读写
+- 在 worker 热路径中使用阻塞文件系统操作
