@@ -39,13 +39,14 @@ class L1MemoryService:
         source_conversation_id: str,
         source_session_key: str,
         memory: L1MemoryExtracted,
+        memory_id: str | None = None,
         embedding_provider: EmbeddingProvider | None = None,
     ) -> str:
-        memory_id = self.resolve_memory_id(user_id=user_id, memory=memory)
+        resolved_memory_id = memory_id or self.resolve_memory_id(user_id=user_id, memory=memory)
         embedding = await self._embed(memory.content, embedding_provider)
         now = get_china_time()
         item = L1MemoryCreate(
-            memory_id=memory_id,
+            memory_id=resolved_memory_id,
             user_id=user_id,
             memory_type=memory.memory_type,
             content=memory.content,
@@ -59,7 +60,7 @@ class L1MemoryService:
             updated_at=now,
         )
         await memory_item_repository.upsert_l1(db, obj_in=item)
-        return memory_id
+        return resolved_memory_id
 
     def resolve_memory_id(self, *, user_id: str, memory: L1MemoryExtracted) -> str:
         source_ids = sorted(set(memory.source_memory_ids))

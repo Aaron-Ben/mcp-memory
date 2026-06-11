@@ -4,7 +4,7 @@ from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mcp_memory.models.memory_items import MemoryItem
-from mcp_memory.schemas.memory_items import L0MemoryRow, L1MemoryCreate, MemoryItemCreate
+from mcp_memory.schemas.memory_items import L0MemoryRow, L1MemoryCreate, L1MemorySearchResult, MemoryItemCreate
 
 __all__ = ["MemoryItemRepository", "memory_item_repository"]
 
@@ -190,6 +190,108 @@ class MemoryItemRepository:
                 "metadata_json": json.dumps(data["metadata"], ensure_ascii=False, separators=(",", ":")),
                 "created_at": data["created_at"],
                 "updated_at": data["updated_at"],
+            },
+        )
+        await db.flush()
+
+    async def count_l1(self, db: AsyncSession, *, user_id: str) -> int:
+        """Count active L1 memories for one user."""
+
+        result = await db.execute(
+            text(
+                """
+                SELECT COUNT(*)::int AS count
+                FROM memory_items
+                WHERE layer = 1
+                  AND status = 'active'
+                  AND is_deleted = false
+                  AND user_id = :user_id
+                """
+            ),
+            {"user_id": user_id},
+        )
+        return int(result.scalar_one() or 0)
+
+    async def search_l1_vector(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str,
+        embedding: list[float],
+        limit: int = 10,
+    ) -> list[L1MemorySearchResult]:
+        """Search active L1 memories by pgvector cosine distance."""
+
+        vector_text = self._vector_to_text(embedding)
+        if vector_text is None:
+            return []
+        result = await db.execute(
+            text(
+                """
+                SELECT
+                    memory_id,
+                    user_id,
+                    memory_type,
+                    content,
+                    priority,
+                    scene_name,
+                    source_conversation_id,
+                    source_session_key,
+                    metadata,
+                    1 - (embedding <=> CAST(CAST(:embedding_text AS text) AS vector)) AS score
+                FROM memory_items
+                WHERE layer = 1
+                  AND status = 'active'
+                  AND is_deleted = false
+                  AND user_id = :user_id
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> CAST(CAST(:embedding_text AS text) AS vector)
+                LIMIT :limit
+                """
+            ),
+            {
+                "user_id": user_id,
+                "embedding_text": vector_text,
+                "limit": limit,
+            },
+        )
+        return [
+            L1MemorySearchResult(
+                memory_id=str(row["memory_id"]),
+                user_id=str(row["user_id"]),
+                memory_type=str(row["memory_type"]),
+                content=str(row["content"]),
+                priority=int(row["priority"] or 50),
+                scene_name=str(row["scene_name"] or ""),
+                source_conversation_id=str(row["source_conversation_id"] or ""),
+                source_session_key=str(row["source_session_key"] or ""),
+                metadata=dict(row["metadata"] or {}),
+                score=float(row["score"]) if row["score"] is not None else None,
+            )
+            for row in result.mappings().all()
+        ]
+
+    async def archive_l1_batch(self, db: AsyncSession, *, user_id: str, memory_ids: list[str]) -> None:
+        """Archive old L1 memories replaced by update/merge decisions."""
+
+        if not memory_ids:
+            return
+        await db.execute(
+            text(
+                """
+                UPDATE memory_items
+                SET status = 'archived',
+                    is_deleted = true,
+                    deleted_at = now(),
+                    updated_at = now()
+                WHERE layer = 1
+                  AND user_id = :user_id
+                  AND memory_id = ANY(CAST(:memory_ids AS text[]))
+                """
+            ),
+            {
+                "user_id": user_id,
+                "memory_ids": memory_ids,
             },
         )
         await db.flush()

@@ -8,7 +8,9 @@ __all__ = [
     "L0MemoryRow",
     "L0ToL1Result",
     "L1MemoryCreate",
+    "L1MemoryDedupDecision",
     "L1MemoryExtracted",
+    "L1MemorySearchResult",
     "MemoryItemCreate",
 ]
 
@@ -91,6 +93,32 @@ class L1MemoryCreate(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+
+class L1MemorySearchResult(BaseModel):
+    """One existing L1 memory recalled as a dedup candidate."""
+
+    memory_id: str
+    user_id: str
+    memory_type: str
+    content: str
+    priority: int
+    scene_name: str
+    source_conversation_id: str
+    source_session_key: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    score: float | None = None
+
+
+class L1MemoryDedupDecision(BaseModel):
+    """Decision for one extracted L1 memory."""
+
+    record_id: str
+    action: Literal["store", "update", "merge", "skip"]
+    target_ids: list[str] = Field(default_factory=list)
+    merged_content: str | None = None
+    merged_type: Literal["persona", "episodic", "instruction"] | None = None
+    merged_priority: int | None = None
 
 
 class L0ToL1Result(BaseModel):

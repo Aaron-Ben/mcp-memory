@@ -43,6 +43,7 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
     pgsql = _as_dict(memory.get("pgsql"))
     capture = _as_dict(memory.get("capture"))
     extraction = _as_dict(memory.get("extraction"))
+    l1 = _as_dict(memory.get("l1"))
     pipeline = _as_dict(memory.get("pipeline"))
     embedding = _as_dict(memory.get("embedding"))
 
@@ -67,6 +68,7 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
     _set_if_present(values, "MEMORY_CAPTURE_ENABLED", capture.get("enabled"))
     _set_if_present(values, "MEMORY_EXTRACTION_ENABLED", extraction.get("enabled"))
     _set_if_present(values, "MEMORY_ENABLE_DEDUP", extraction.get("enableDedup"))
+    _set_if_present(values, "MEMORY_ENABLE_DEDUP", l1.get("dedup"))
     _set_if_present(values, "MEMORY_MAX_MEMORIES_PER_SESSION", extraction.get("maxMemoriesPerSession"))
     _set_if_present(values, "PIPELINE_EVERY_N_CONVERSATIONS", pipeline.get("everyNConversations"))
     _set_if_present(values, "PIPELINE_ENABLE_WARMUP", pipeline.get("enableWarmup"))

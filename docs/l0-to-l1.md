@@ -16,6 +16,8 @@ mcp-client
   -> mcp_memory.services.pipeline_scheduler.PipelineScheduler.notify_conversation
   -> pipeline_state 记录 conversation_count / warmup_threshold / last_l1_cursor
   -> mcp_memory.pipelines.l0_to_l1.L0ToL1Pipeline
+  -> L1 extraction
+  -> L1 vector recall + LLM dedup
   -> memory_items(layer = 1)
 ```
 
@@ -35,13 +37,14 @@ L0 保存当前做的事：
 - 后台 in-process scheduler。
 - L0 已处理进度记录：`pipeline_state.last_l1_cursor`。
 - warmup/阈值触发与 idle timer。
+- L1 向量召回 + LLM dedup。
+- `store` / `update` / `merge` / `skip` 决策。
+- `update` / `merge` 时旧 L1 归档。
 
 当前还没有：
 
-- L1 去重逻辑。
-- 相似 L1 向量召回 / FTS 召回。
-- `update` / `merge` / `skip` 决策。
-- 旧 L1 归档删除。
+- 相似 L1 的 FTS 召回 fallback。
+- 更复杂的多阶段候选过滤和冲突策略。
 - 分布式 worker / 多进程任务队列。
 
 ## yuanxi-memory 参考流程
@@ -177,7 +180,11 @@ memory.embedding.dimensions
 memory.embedding.timeoutMs
 memory.embedding.sendDimensions
 memory.embedding.maxInputChars
+
+memory.l1.dedup
 ```
+
+`memory.l1.dedup=true` 时启用 L1 向量召回和 LLM dedup；设置为 `false` 时跳过去重，抽取出的 L1 直接写入。
 
 LLM 预期输出结构：
 
@@ -355,22 +362,23 @@ l1_ + sha256(user_id + source_l0_ids + extractor_version + normalized_content)
 
 这样 pipeline 重试时不会重复写入同一条 L1。
 
-### 建议的第一阶段实现范围
+### 当前实现范围
 
-第一阶段可以先做最小闭环：
+当前已经完成的 L0 -> L1 基础闭环：
 
 1. `query_l0_for_l1(user_id, source_session_key, after_timestamp_ms, limit)`。
 2. `L1Extractor` 使用固定 prompt 调 LLM。
-3. `upsert_l1()` 写入 `memory_items(layer=1)`，接口第一版就应支持可选 `embedding`。
-4. 正常路径在写 L1 前生成 embedding，用于后续召回和去重；embedding 失败时允许降级写入 `embedding = NULL`。
-5. 第一阶段可暂不做复杂 LLM dedup，但不要把 `upsert_l1()` 设计成无法接收 embedding。
-6. 记录 `metadata.source_memory_ids` 和 `metadata.extractor_version`。
+3. 正常路径在写 L1 前生成 embedding；embedding 失败时允许降级写入 `embedding = NULL`。
+4. `L1DedupService` 对新 L1 生成 embedding，向量召回已有 L1，调用 LLM 输出 `store` / `update` / `merge` / `skip`。
+5. `update` / `merge` 会归档被替换的旧 L1，再写入合并后的新 L1。
+6. `upsert_l1()` 写入 `memory_items(layer=1)`。
+7. 记录 `metadata.source_memory_ids`、`metadata.extractor_version`，dedup 合并时额外记录 `metadata.dedup_action` 和 `metadata.dedup_target_ids`。
 
-第二阶段再补：
+后续再补：
 
-- 相似 L1 召回。
-- LLM dedup。
-- pipeline job 状态表或 pending job 记录。
+- 相似 L1 的 FTS fallback。
+- 更细粒度的多阶段候选过滤。
+- 分布式 pipeline job 状态表或 pending job 记录。
 - L1 -> L2 聚合触发。
 
 ## 和当前代码的差距
@@ -382,16 +390,17 @@ l1_ + sha256(user_id + source_l0_ids + extractor_version + normalized_content)
 - L0 repository。
 - L0 service。
 - gRPC ingest。
-
-当前缺失：
-
 - L1 schema。
 - `upsert_l1()`。
 - `query_l0_for_l1()`。
 - L1 prompt。
 - L1 extractor。
-- L1 dedup。
+- L1 向量召回 + LLM dedup。
 - L0->L1 pipeline。
 - 后台 worker 或定时扫描。
 
-因此，下一步不应直接写 L2/L3，而应先补齐 L0->L1 的最小闭环。
+当前仍缺失：
+
+- L1 去重的 FTS fallback。
+- L1 -> L2 聚合触发。
+- L2 / L3 pipeline。

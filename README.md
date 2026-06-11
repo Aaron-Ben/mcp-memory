@@ -24,6 +24,7 @@ python -m pip install -e ".[dev]"
 # 配置本地服务
 cp config/local.example.yaml config/local.yaml
 # 编辑 config/local.yaml 配置数据库、gRPC、LLM 和 embedding
+# memory.l1.dedup=true 启用 L1 去重，false 关闭 L1 去重
 
 # docket启动
 docker compose -f docker-compose-db.yaml up -d
@@ -109,7 +110,9 @@ IngestMessages
   -> 未达到阈值则设置 idle timer
   -> L0ToL1Pipeline 按 last_l1_cursor 查询 L0
   -> LLM 抽取 L1
-  -> 写入 memory_items(layer = 1)
+  -> embedding 召回相似 L1
+  -> LLM dedup 决策 store/update/merge/skip
+  -> 写入 memory_items(layer = 1)，必要时归档旧 L1
   -> 更新 pipeline_state.last_l1_cursor / last_scene_name
 ```
 
@@ -119,7 +122,17 @@ IngestMessages
 alembic upgrade head
 ```
 
-当前仍未实现完整 `yuanxi-memory` 的 L1 去重与合并：相似 L1 召回、LLM dedup、`update/merge/skip`、旧 L1 归档等逻辑后续补充。
+当前 L1 去重已实现向量召回 + LLM 决策的基础路径：`store` 直接写入，`skip` 忽略新记忆，`update` / `merge` 会先归档命中的旧 L1，再写入新的 L1。尚未补齐 `yuanxi-memory` 中可能使用的全文检索 fallback、多阶段召回优化和更细粒度冲突策略。
+
+可以通过 `config/local.yaml` 控制是否启用 L1 去重：
+
+```yaml
+memory:
+  l1:
+    dedup: true
+```
+
+设置为 `false` 时，L0->L1 会跳过相似 L1 召回和 LLM dedup，抽取出的 L1 直接写入。
 
 重新生成 Protobuf 代码：
 

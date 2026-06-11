@@ -11,7 +11,8 @@ from mcp_memory.adapters import (
 from mcp_memory.config import settings
 from mcp_memory.extractors import L1Extractor, PromptL1Extractor
 from mcp_memory.repositories.memory_items import memory_item_repository
-from mcp_memory.schemas import L0MemoryRow, L0ToL1Result, L1MemoryExtracted
+from mcp_memory.schemas import L0MemoryRow, L0ToL1Result, L1MemoryDedupDecision, L1MemoryExtracted
+from mcp_memory.services.l1_dedup import L1DedupService
 from mcp_memory.services.l1_memory import EmbeddingProvider, l1_memory_service
 
 __all__ = ["L0ToL1Pipeline", "create_l0_to_l1_pipeline_from_settings"]
@@ -27,12 +28,14 @@ class L0ToL1Pipeline:
         *,
         extractor: L1Extractor,
         embedding_provider: EmbeddingProvider | None = None,
+        dedup_service: L1DedupService | None = None,
         max_new_messages: int = 10,
         max_background_messages: int = 5,
         max_memories_per_run: int = 10,
     ) -> None:
         self.extractor = extractor
         self.embedding_provider = embedding_provider
+        self.dedup_service = dedup_service
         self.max_new_messages = max_new_messages
         self.max_background_messages = max_background_messages
         self.max_memories_per_run = max_memories_per_run
@@ -96,8 +99,24 @@ class L0ToL1Pipeline:
             len(extracted),
         )
 
+        record_ids = [l1_memory_service.resolve_memory_id(user_id=user_id, memory=memory) for memory in extracted]
+        decisions = await self._dedup(db, user_id=user_id, memories=extracted, record_ids=record_ids)
+
         stored_ids: list[str] = []
-        for memory in extracted:
+        skipped_count = 0
+        for memory, record_id, decision in zip(extracted, record_ids, decisions, strict=True):
+            if decision.action == "skip":
+                skipped_count += 1
+                continue
+
+            memory_to_save = self._apply_dedup_decision(memory, decision)
+            if decision.action in {"update", "merge"}:
+                await memory_item_repository.archive_l1_batch(
+                    db,
+                    user_id=user_id,
+                    memory_ids=decision.target_ids,
+                )
+
             source_rows = self._resolve_source_rows(memory.source_memory_ids, new_messages)
             source_conversation_id = self._resolve_source_conversation_id(source_rows, new_messages)
             memory_id = await l1_memory_service.save_extracted(
@@ -105,15 +124,17 @@ class L0ToL1Pipeline:
                 user_id=user_id,
                 source_conversation_id=source_conversation_id,
                 source_session_key=source_session_key,
-                memory=memory,
+                memory=memory_to_save,
+                memory_id=record_id,
                 embedding_provider=self.embedding_provider,
             )
             stored_ids.append(memory_id)
         logger.info(
-            "[L0->L1] L1 写入完成: user_id=%s session=%s stored=%s memory_ids=%s",
+            "[L0->L1] L1 写入完成: user_id=%s session=%s stored=%s skipped=%s memory_ids=%s",
             user_id,
             source_session_key,
             len(stored_ids),
+            skipped_count,
             stored_ids,
         )
 
@@ -127,6 +148,43 @@ class L0ToL1Pipeline:
             has_more=has_more,
             has_full_backlog=has_full_backlog,
             memory_ids=stored_ids,
+        )
+
+    async def _dedup(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str,
+        memories: list[L1MemoryExtracted],
+        record_ids: list[str],
+    ) -> list[L1MemoryDedupDecision]:
+        if self.dedup_service is None:
+            return [L1MemoryDedupDecision(record_id=record_id, action="store") for record_id in record_ids]
+        return await self.dedup_service.dedup(
+            db,
+            user_id=user_id,
+            memories=memories,
+            record_ids=record_ids,
+        )
+
+    def _apply_dedup_decision(
+        self,
+        memory: L1MemoryExtracted,
+        decision: L1MemoryDedupDecision,
+    ) -> L1MemoryExtracted:
+        if decision.action not in {"update", "merge"}:
+            return memory
+
+        metadata = dict(memory.metadata)
+        metadata["dedup_action"] = decision.action
+        metadata["dedup_target_ids"] = decision.target_ids
+        return memory.model_copy(
+            update={
+                "content": decision.merged_content or memory.content,
+                "memory_type": decision.merged_type or memory.memory_type,
+                "priority": decision.merged_priority if decision.merged_priority is not None else memory.priority,
+                "metadata": metadata,
+            }
         )
 
     def _slice_process_rows(self, rows: list[L0MemoryRow]) -> list[L0MemoryRow]:
@@ -179,8 +237,15 @@ def create_l0_to_l1_pipeline_from_settings() -> L0ToL1Pipeline | None:
     llm_runner = create_llm_runner_from_settings()
     if llm_runner is None:
         return None
+    embedding_provider = create_embedding_provider_from_settings()
+    dedup_service = (
+        L1DedupService(llm_runner=llm_runner, embedding_provider=embedding_provider)
+        if settings.MEMORY_ENABLE_DEDUP
+        else None
+    )
     return L0ToL1Pipeline(
         extractor=PromptL1Extractor(llm_runner),
-        embedding_provider=create_embedding_provider_from_settings(),
+        embedding_provider=embedding_provider,
+        dedup_service=dedup_service,
         max_memories_per_run=settings.MEMORY_MAX_MEMORIES_PER_SESSION,
     )

@@ -26,8 +26,10 @@ memory:
 
   extraction:
     enabled: true
-    enableDedup: true
     maxMemoriesPerSession: 20
+
+  l1:
+    dedup: true
 
   persona:
     triggerEveryN: 50
