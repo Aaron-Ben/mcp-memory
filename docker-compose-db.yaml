@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  db:
+    image: pgvector/pgvector:pg15
+    container_name: mcp_memory_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: SecurePassword123!
+      POSTGRES_DB: mcp_memory
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - mcp_memory_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d mcp_memory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mcp_memory_postgres_data:
