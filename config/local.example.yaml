@@ -29,6 +29,7 @@ memory:
     maxMemoriesPerSession: 20
 
   l1:
+    extract: true
     dedup: true
 
   persona:

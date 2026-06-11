@@ -14,6 +14,7 @@ from mcp_memory.repositories.memory_items import memory_item_repository
 from mcp_memory.schemas import L0MemoryRow, L0ToL1Result, L1MemoryDedupDecision, L1MemoryExtracted
 from mcp_memory.services.l1_dedup import L1DedupService
 from mcp_memory.services.l1_memory import EmbeddingProvider, l1_memory_service
+from mcp_memory.utils.filters import should_extract_l1
 
 __all__ = ["L0ToL1Pipeline", "create_l0_to_l1_pipeline_from_settings"]
 
@@ -29,6 +30,7 @@ class L0ToL1Pipeline:
         extractor: L1Extractor,
         embedding_provider: EmbeddingProvider | None = None,
         dedup_service: L1DedupService | None = None,
+        enable_extract_filter: bool = True,
         max_new_messages: int = 10,
         max_background_messages: int = 5,
         max_memories_per_run: int = 10,
@@ -36,6 +38,7 @@ class L0ToL1Pipeline:
         self.extractor = extractor
         self.embedding_provider = embedding_provider
         self.dedup_service = dedup_service
+        self.enable_extract_filter = enable_extract_filter
         self.max_new_messages = max_new_messages
         self.max_background_messages = max_background_messages
         self.max_memories_per_run = max_memories_per_run
@@ -74,17 +77,33 @@ class L0ToL1Pipeline:
         has_full_backlog = len(rows) >= query_limit and has_unprocessed
         has_more = has_unprocessed
         latest_cursor = max((row.timestamp_ms for row in processed_rows), default=None)
+
+        qualified_rows = self._filter_qualified_rows(processed_rows)
         logger.info(
-            "[L0->L1] 准备抽取 L1: user_id=%s session=%s queried=%s processed=%s latest_cursor=%s has_more=%s",
+            "[L0->L1] 准备抽取 L1: user_id=%s session=%s queried=%s processed=%s qualified=%s "
+            "latest_cursor=%s has_more=%s",
             user_id,
             source_session_key,
             len(rows),
             len(processed_rows),
+            len(qualified_rows),
             latest_cursor,
             has_more,
         )
 
-        background_messages, new_messages = self._split_rows(processed_rows)
+        if not qualified_rows:
+            logger.info("[L0->L1] 所有消息未通过质量过滤: user_id=%s session=%s", user_id, source_session_key)
+            return L0ToL1Result(
+                input_count=len(rows),
+                processed_count=len(processed_rows),
+                extracted_count=0,
+                stored_count=0,
+                latest_cursor=latest_cursor,
+                has_more=has_more,
+                has_full_backlog=has_full_backlog,
+            )
+
+        background_messages, new_messages = self._split_rows(qualified_rows)
         extracted = await self.extractor.extract(
             new_messages=new_messages,
             background_messages=background_messages,
@@ -187,6 +206,15 @@ class L0ToL1Pipeline:
             }
         )
 
+    def _filter_qualified_rows(self, rows: list[L0MemoryRow]) -> list[L0MemoryRow]:
+        """Filter out L0 messages that don't pass quality checks.
+
+        When extract filtering is disabled, all rows pass through unchanged.
+        """
+        if not self.enable_extract_filter:
+            return rows
+        return [row for row in rows if should_extract_l1(row.content)]
+
     def _slice_process_rows(self, rows: list[L0MemoryRow]) -> list[L0MemoryRow]:
         if self.max_new_messages <= 0 or len(rows) <= self.max_new_messages:
             return rows
@@ -247,5 +275,6 @@ def create_l0_to_l1_pipeline_from_settings() -> L0ToL1Pipeline | None:
         extractor=PromptL1Extractor(llm_runner),
         embedding_provider=embedding_provider,
         dedup_service=dedup_service,
+        enable_extract_filter=settings.MEMORY_ENABLE_EXTRACT_FILTER,
         max_memories_per_run=settings.MEMORY_MAX_MEMORIES_PER_SESSION,
     )

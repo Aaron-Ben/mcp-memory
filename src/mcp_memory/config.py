@@ -67,6 +67,7 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
 
     _set_if_present(values, "MEMORY_CAPTURE_ENABLED", capture.get("enabled"))
     _set_if_present(values, "MEMORY_EXTRACTION_ENABLED", extraction.get("enabled"))
+    _set_if_present(values, "MEMORY_ENABLE_EXTRACT_FILTER", l1.get("extract"))
     _set_if_present(values, "MEMORY_ENABLE_DEDUP", extraction.get("enableDedup"))
     _set_if_present(values, "MEMORY_ENABLE_DEDUP", l1.get("dedup"))
     _set_if_present(values, "MEMORY_MAX_MEMORIES_PER_SESSION", extraction.get("maxMemoriesPerSession"))
@@ -109,6 +110,7 @@ class Settings(BaseModel):
 
     MEMORY_CAPTURE_ENABLED: bool = True
     MEMORY_EXTRACTION_ENABLED: bool = True
+    MEMORY_ENABLE_EXTRACT_FILTER: bool = True
     MEMORY_ENABLE_DEDUP: bool = True
     MEMORY_MAX_MEMORIES_PER_SESSION: int = 20
     PIPELINE_EVERY_N_CONVERSATIONS: int = 5
