@@ -21,15 +21,15 @@ conda activate mcp-memory
 # 安装依赖
 python -m pip install -e ".[dev]"
 
+# 配置本地服务
+cp config/local.example.yaml config/local.yaml
+# 编辑 config/local.yaml 配置数据库、gRPC、LLM 和 embedding
+
 # docket启动
 docker compose -f docker-compose-db.yaml up -d
 
 # 迁移建表
 alembic upgrade head
-
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件配置数据库和服务
 
 ```
 
@@ -41,12 +41,14 @@ mcp-memory/
 ├── pyproject.toml                  # Python 依赖、开发依赖、ruff/mypy 配置
 ├── docker-compose-db.yaml          # 本地 PostgreSQL/pgvector 数据库
 ├── alembic.ini                     # Alembic 配置
+├── config/
+│   └── local.yaml                  # 本地配置，包含数据库、gRPC、LLM、embedding 等配置
 ├── migrations/                     # 数据库迁移脚本
 │   ├── env.py                      # Alembic 迁移环境
 │   └── versions/                   # 具体迁移版本
 └── src/mcp_memory/
     ├── app.py                      # 应用启动编排，目前启动 gRPC 服务
-    ├── config.py                   # 环境变量与配置项
+    ├── config.py                   # 读取 config/local.yaml 并生成运行配置
     ├── db/                         # 数据库连接、Session、健康检查
     ├── models/                     # SQLAlchemy 表模型
     │   ├── base.py                 # Base、时间字段、软删除公共字段
@@ -55,6 +57,8 @@ mcp-memory/
     ├── schemas/                    # Pydantic 入参/数据传输结构
     ├── repositories/               # 数据库读写层，封装 SQL/ORM 持久化操作
     ├── services/                   # 业务逻辑层，如 L0 保存、过滤、metadata 构造
+    ├── prompts/                    # Markdown 提示词与 PromptLoader
+    │   └── modules/                # 功能模块提示词，如 L1 抽取 prompt
     ├── grpc/                       # gRPC 服务端实现
     │   ├── server.py               # gRPC server 启动与端口监听
     │   └── memory_service.py       # Memory service RPC 实现

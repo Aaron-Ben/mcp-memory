@@ -30,7 +30,7 @@ def json_deserializer(data: str) -> Any:
 async_engine = create_async_engine(
     settings.ASYNC_DATABASE_URI,
     poolclass=AsyncAdaptedQueuePool,
-    pool_size=20,
+    pool_size=settings.POSTGRES_POOL_SIZE,
     max_overflow=10,
     pool_pre_ping=True,
     pool_recycle=30,

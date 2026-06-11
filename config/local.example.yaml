@@ -1,0 +1,75 @@
+deployMode: service
+stateBackend: "local"
+
+server:
+  host: "127.0.0.1"
+  port: 8420
+
+grpc:
+  enabled: true
+  host: "127.0.0.1"
+  port: 50051
+
+data:
+  baseDir: "~/.mcp-memory"
+
+llm:
+  baseUrl: ""
+  apiKey: ""
+  model: ""
+  maxTokens: 4096
+  timeoutMs: 120000
+
+memory:
+  capture:
+    enabled: true
+
+  extraction:
+    enabled: true
+    enableDedup: true
+    maxMemoriesPerSession: 20
+
+  persona:
+    triggerEveryN: 50
+    maxScenes: 15
+
+  pipeline:
+    everyNConversations: 5
+    enableWarmup: true
+    l1IdleTimeoutSeconds: 600
+    l2DelayAfterL1Seconds: 90
+    l2MinIntervalSeconds: 900
+    l2MaxIntervalSeconds: 3600
+
+  recall:
+    enabled: true
+    maxResults: 5
+    scoreThreshold: 0.3
+    strategy: "hybrid"
+    timeoutMs: 5000
+
+  storeBackend: "pgsql"
+  pgsql:
+    host: "127.0.0.1"
+    port: 5433
+    database: "mcp_memory"
+    user: "admin"
+    password: "SecurePassword123!"
+    max: 20
+    vectorDimensions: 1024
+    fixedUserId: ""
+
+  embedding:
+    enabled: true
+    provider: "openai-compatible"
+    baseUrl: ""
+    apiKey: ""
+    model: ""
+    dimensions: 1024
+    timeoutMs: 60000
+    sendDimensions: true
+    maxInputChars: 0
+
+  bm25:
+    enabled: true
+    language: "zh"

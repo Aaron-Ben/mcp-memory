@@ -4,7 +4,7 @@ from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mcp_memory.models.memory_items import MemoryItem
-from mcp_memory.schemas.memory_items import MemoryItemCreate
+from mcp_memory.schemas.memory_items import L0MemoryRow, L1MemoryCreate, MemoryItemCreate
 
 __all__ = ["MemoryItemRepository", "memory_item_repository"]
 
@@ -73,6 +73,131 @@ class MemoryItemRepository:
             },
         )
         await db.flush()
+
+    async def query_l0_for_l1(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str,
+        source_session_key: str,
+        after_timestamp_ms: int | None = None,
+        limit: int = 500,
+    ) -> list[L0MemoryRow]:
+        """Query L0 messages for L1 extraction in natural time order."""
+
+        time_expr = self._l0_time_ms_expr()
+        params: dict[str, object] = {
+            "user_id": user_id,
+            "source_session_key": source_session_key,
+            "limit": limit,
+        }
+        time_filter = ""
+        if after_timestamp_ms is not None and after_timestamp_ms > 0:
+            time_filter = f"AND {time_expr} > :after_timestamp_ms"
+            params["after_timestamp_ms"] = after_timestamp_ms
+
+        result = await db.execute(
+            text(
+                f"""
+                SELECT
+                    memory_id,
+                    user_id,
+                    source_conversation_id,
+                    source_session_key,
+                    content,
+                    metadata,
+                    COALESCE(metadata->>'_role', memory_type) AS role,
+                    {time_expr} AS timestamp_ms,
+                    COALESCE(metadata->>'recorded_at', '') AS recorded_at
+                FROM memory_items
+                WHERE layer = 0
+                  AND status = 'active'
+                  AND is_deleted = false
+                  AND user_id = :user_id
+                  AND (
+                    source_conversation_id = :source_session_key
+                    OR source_session_key = :source_session_key
+                  )
+                  {time_filter}
+                ORDER BY {time_expr} ASC
+                LIMIT :limit
+                """
+            ),
+            params,
+        )
+        rows = result.mappings().all()
+        return [
+            L0MemoryRow(
+                memory_id=str(row["memory_id"]),
+                user_id=str(row["user_id"]),
+                source_conversation_id=str(row["source_conversation_id"] or ""),
+                source_session_key=str(row["source_session_key"] or ""),
+                role=str(row["role"] or ""),
+                content=str(row["content"] or ""),
+                timestamp_ms=int(float(row["timestamp_ms"] or 0)),
+                recorded_at=str(row["recorded_at"] or ""),
+                metadata=dict(row["metadata"] or {}),
+            )
+            for row in rows
+        ]
+
+    async def upsert_l1(self, db: AsyncSession, *, obj_in: L1MemoryCreate) -> None:
+        """Insert or update one L1 atomic memory."""
+
+        data = obj_in.model_dump()
+        vector_text = self._vector_to_text(data["embedding"])
+        await db.execute(
+            text(
+                """
+                INSERT INTO memory_items (
+                    memory_id, user_id, layer, memory_type, content, embedding,
+                    priority, scene_name, source_conversation_id, source_session_key,
+                    metadata, status, created_at, updated_at
+                ) VALUES (
+                    :memory_id, :user_id, 1, :memory_type, :content,
+                    CASE WHEN :embedding_text IS NULL THEN NULL ELSE CAST(:embedding_text AS vector) END,
+                    :priority, :scene_name, :source_conversation_id, :source_session_key,
+                    CAST(:metadata_json AS jsonb), 'active', :created_at, :updated_at
+                )
+                ON CONFLICT (memory_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    memory_type = EXCLUDED.memory_type,
+                    embedding = COALESCE(EXCLUDED.embedding, memory_items.embedding),
+                    priority = EXCLUDED.priority,
+                    scene_name = EXCLUDED.scene_name,
+                    source_conversation_id = EXCLUDED.source_conversation_id,
+                    source_session_key = EXCLUDED.source_session_key,
+                    metadata = EXCLUDED.metadata,
+                    status = 'active',
+                    is_deleted = false,
+                    deleted_at = NULL,
+                    updated_at = EXCLUDED.updated_at
+                """
+            ),
+            {
+                "memory_id": data["memory_id"],
+                "user_id": data["user_id"],
+                "memory_type": data["memory_type"],
+                "content": data["content"],
+                "embedding_text": vector_text,
+                "priority": data["priority"],
+                "scene_name": data["scene_name"],
+                "source_conversation_id": data["source_conversation_id"],
+                "source_session_key": data["source_session_key"],
+                "metadata_json": json.dumps(data["metadata"], ensure_ascii=False, separators=(",", ":")),
+                "created_at": data["created_at"],
+                "updated_at": data["updated_at"],
+            },
+        )
+        await db.flush()
+
+    def _l0_time_ms_expr(self) -> str:
+        return "COALESCE(NULLIF(metadata->>'message_ts_ms', '')::double precision, EXTRACT(EPOCH FROM created_at) * 1000)"
+
+    def _vector_to_text(self, embedding: list[float] | None) -> str | None:
+        if not embedding:
+            return None
+        return "[" + ",".join(str(float(value)) for value in embedding) + "]"
 
 
 memory_item_repository = MemoryItemRepository()
