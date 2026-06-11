@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "SecurePassword123!"
     POSTGRES_DB: str = "mcp_memory"
 
+    GRPC_HOST: str = "127.0.0.1"
+    GRPC_PORT: int = 50051
+
     SQLALCHEMY_DATABASE_URI: str | None = Field(default=None)
     ASYNC_DATABASE_URI: str | None = Field(default=None)
 

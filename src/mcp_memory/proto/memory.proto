@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package memory.v1;
+
+service Memory {
+  rpc IngestMessages (IngestRequest) returns (IngestReply);
+  rpc GetMemory (GetMemoryRequest) returns (GetMemoryReply);
+  rpc Enabled (EnabledRequest) returns (EnabledReply);
+  rpc Dream (DreamRequest) returns (DreamReply);
+  rpc ResetMemory (ResetRequest) returns (ResetReply);
+}
+
+message Message {
+  string id = 1;
+  string role = 2;
+  string content = 3;
+  string tool_name = 4;
+  int64 timestamp = 5;
+}
+
+message IngestRequest {
+  string user_id = 1;
+  string conversation_id = 2;
+  repeated Message messages = 3;
+}
+
+message IngestReply {
+  bool accepted = 1;
+}
+
+message GetMemoryRequest {
+  string user_id = 1;
+  string query = 2;
+  int32 limit = 3;
+}
+
+message GetMemoryReply {
+  string memory_text = 1;
+}
+
+message EnabledRequest {
+  string user_id = 1;
+  optional bool enabled = 2;
+}
+
+message EnabledReply {
+  bool enabled = 1;
+}
+
+message DreamRequest {
+  string user_id = 1;
+  optional bool enabled = 2;
+}
+
+message DreamReply {
+  bool enabled = 1;
+}
+
+message ResetRequest {
+  string user_id = 1;
+}
+
+message ResetReply {
+  bool success = 1;
+}
