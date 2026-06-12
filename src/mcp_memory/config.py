@@ -78,7 +78,10 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
     _set_if_present(values, "PIPELINE_L2_DELAY_AFTER_L1_SECONDS", pipeline.get("l2DelayAfterL1Seconds"))
     _set_if_present(values, "PIPELINE_L2_MIN_INTERVAL_SECONDS", pipeline.get("l2MinIntervalSeconds"))
     _set_if_present(values, "PIPELINE_L2_MAX_INTERVAL_SECONDS", pipeline.get("l2MaxIntervalSeconds"))
+    _set_if_present(values, "MEMORY_PERSONA_ENABLED", persona.get("enabled"))
     _set_if_present(values, "MEMORY_MAX_SCENES", persona.get("maxScenes"))
+    _set_if_present(values, "MEMORY_PERSONA_TRIGGER_EVERY_N", persona.get("triggerEveryN"))
+    _set_if_present(values, "MEMORY_PERSONA_MAX_LENGTH", persona.get("maxLength"))
 
     _set_if_present(values, "EMBEDDING_ENABLED", embedding.get("enabled"))
     _set_if_present(values, "EMBEDDING_API_KEY", embedding.get("apiKey"))
@@ -124,7 +127,10 @@ class Settings(BaseModel):
     PIPELINE_L2_DELAY_AFTER_L1_SECONDS: int = 90
     PIPELINE_L2_MIN_INTERVAL_SECONDS: int = 900
     PIPELINE_L2_MAX_INTERVAL_SECONDS: int = 3600
+    MEMORY_PERSONA_ENABLED: bool = True
     MEMORY_MAX_SCENES: int = 15
+    MEMORY_PERSONA_TRIGGER_EVERY_N: int = 50
+    MEMORY_PERSONA_MAX_LENGTH: int = 2000
 
     EMBEDDING_ENABLED: bool = True
     EMBEDDING_API_KEY: str | None = None

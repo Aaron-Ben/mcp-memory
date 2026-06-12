@@ -57,9 +57,10 @@ mcp-memory/
     │   ├── memory_items.py         # memory_items 记忆表
     │   ├── pipeline_state.py       # L0->L1/L1->L2 调度状态表
     │   └── switch.py               # memory_switch 开关表
-    ├── pipelines/                  # 记忆分层流水线实现，负责一次具体 L0->L1 / L1->L2 执行
+    ├── pipelines/                  # 记忆分层流水线实现，负责一次具体 L0->L1 / L1->L2 / L2->L3 执行
     │   ├── l0_to_l1.py             # 查询增量 L0、质量过滤、LLM 抽取、dedup、写入 L1
-    │   └── l1_to_l2.py             # 查询增量 L1、生成/合并 L2 场景块、写入 L2
+    │   ├── l1_to_l2.py             # 查询增量 L1、生成/合并 L2 场景块、写入 L2
+    │   └── l2_to_l3.py             # 查询变化 L2、生成/更新 L3 用户画像
     ├── extractors/                 # LLM 抽取器与响应解析
     │   └── l1_extractor.py         # L1 prompt 调用、JSON 解析和解析诊断日志
     ├── schemas/                    # Pydantic 入参/数据传输结构
@@ -71,7 +72,8 @@ mcp-memory/
     │   ├── l1_memory.py            # L1 记忆保存、embedding 生成、L1 memory_id 和 metadata 构造
     │   ├── l1_dedup.py             # L1 相似召回后的 LLM dedup 决策，输出 store/update/merge/skip
     │   ├── l2_scene.py             # L2 场景选择、scene markdown 生成、filename/memory_id/meta 构造
-    │   └── pipeline_scheduler.py   # 进程内调度器，连接 gRPC 入站通知、pipeline_state、L0->L1 和 L1->L2
+    │   ├── l3_persona.py           # L3 persona markdown 生成、Scene Navigation 追加、L3 memory_id/meta 构造
+    │   └── pipeline_scheduler.py   # 进程内调度器，连接 gRPC 入站通知、pipeline_state、L0->L1、L1->L2 和 L2->L3
     ├── prompts/                    # Markdown 提示词与 PromptLoader
     │   └── modules/                # 功能模块提示词，如 L1 抽取、L2 场景 prompt
     ├── adapters/                   # 外部能力适配，如 LLM runner 和 embedding provider
@@ -102,6 +104,8 @@ mcp-client
   -> L2 timer
   -> mcp_memory.pipelines.l1_to_l2.L1ToL2Pipeline
   -> PostgreSQL memory_items(layer = 2)
+  -> mcp_memory.pipelines.l2_to_l3.L2ToL3Pipeline
+  -> PostgreSQL memory_items(layer = 3)
 ```
 
 分层职责：
@@ -110,7 +114,7 @@ mcp-client
 - `schemas`: 定义服务内部入参和数据传输结构，不直接访问数据库。
 - `repositories`: 只处理数据库读写，避免混入业务规则。
 - `services`: 处理业务规则和流程编排，例如 L0 消息过滤、`memory_id` 生成、metadata 构造、L1 dedup、L2 场景构造和后台调度。`services` 不应该直接承担大段 SQL，也不应该把一次完整分层转换的执行细节写散。
-- `pipeline_scheduler.py`: 当前是进程内调度器，不是 CRUD，也不是 LLM pipeline 本体。它负责接收 `IngestMessages` 后的 L0 通知，维护每个 `(user_id, source_session_key)` 的调度任务，按照 warmup/轮数阈值或 idle timer 触发 L0->L1；当 L1 实际写入新记忆后，再根据 `pipeline_state` 中的 L2 调度字段设置 L1->L2 延迟 timer；同时负责后台 task 的创建、取消、异常落库和 shutdown 清理。
+- `pipeline_scheduler.py`: 当前是进程内调度器，不是 CRUD，也不是 LLM pipeline 本体。它负责接收 `IngestMessages` 后的 L0 通知，维护每个 `(user_id, source_session_key)` 的调度任务，按照 warmup/轮数阈值或 idle timer 触发 L0->L1；当 L1 实际写入新记忆后，再根据 `pipeline_state` 中的 L2 调度字段设置 L1->L2 延迟 timer；当 L2 实际写入场景后，按 `user_id` 触发 L2->L3，并用内存 task/pending 避免同一用户并发生成 persona；同时负责后台 task 的创建、取消、异常落库和 shutdown 清理。
 - `pipelines`: 执行一次具体跨层转换，例如从 L0 查询增量消息、调用 LLM 抽取 L1、把 L1 整合为 L2、推进 cursor。pipeline 本身不决定“什么时候运行”，运行时机由 `pipeline_scheduler.py` 和 `pipeline_state` 决定。
 - `grpc`: 对外提供 gRPC 接口，负责协议转换和调用 service。
 - `proto`: 保存协议定义及生成代码。修改 `memory.proto` 后需要重新生成 `*_pb2*` 文件。

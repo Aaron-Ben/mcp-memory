@@ -9,7 +9,11 @@ from typing import Any
 from mcp_memory.config import settings
 from mcp_memory.db import async_db_session
 from mcp_memory.models.base import get_china_time
-from mcp_memory.pipelines import create_l0_to_l1_pipeline_from_settings, create_l1_to_l2_pipeline_from_settings
+from mcp_memory.pipelines import (
+    create_l0_to_l1_pipeline_from_settings,
+    create_l1_to_l2_pipeline_from_settings,
+    create_l2_to_l3_pipeline_from_settings,
+)
 from mcp_memory.repositories import pipeline_state_repository
 
 __all__ = ["PipelineScheduler", "pipeline_scheduler"]
@@ -24,6 +28,8 @@ class PipelineScheduler:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._idle_tasks: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._l2_tasks: dict[tuple[str, str], asyncio.Task[Any]] = {}
+        self._l3_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._l3_pending: set[str] = set()
 
     async def notify_conversation(
         self,
@@ -148,6 +154,10 @@ class PipelineScheduler:
         for task in self._l2_tasks.values():
             task.cancel()
         self._l2_tasks.clear()
+        for task in self._l3_tasks.values():
+            task.cancel()
+        self._l3_tasks.clear()
+        self._l3_pending.clear()
         if active_tasks:
             await asyncio.gather(*active_tasks, return_exceptions=True)
 
@@ -290,6 +300,8 @@ class PipelineScheduler:
                 result.skipped,
                 result.latest_cursor,
             )
+            if result.stored_count > 0:
+                self.notify_l3_after_l2(user_id=user_id)
         except Exception:
             logger.exception("[L1->L2] 后台任务失败: user=%s session=%s", user_id, source_session_key)
             await self._mark_l2_failed(user_id=user_id, source_session_key=source_session_key)
@@ -301,6 +313,55 @@ class PipelineScheduler:
                 user_id=user_id,
                 source_session_key=source_session_key,
             )
+
+    def notify_l3_after_l2(self, *, user_id: str) -> None:
+        existing = self._l3_tasks.get(user_id)
+        if existing is not None and not existing.done():
+            self._l3_pending.add(user_id)
+            logger.info("[L2->L3] L3 正在运行，标记 pending: user=%s", user_id)
+            return
+
+        logger.info("[L2->L3] L2 完成后触发 L3: user=%s", user_id)
+        task = asyncio.create_task(self._run_l3_with_pending(user_id=user_id))
+        self._l3_tasks[user_id] = task
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _run_l3_with_pending(self, *, user_id: str) -> None:
+        try:
+            while True:
+                self._l3_pending.discard(user_id)
+                await self.run_l3(user_id=user_id)
+                if user_id not in self._l3_pending:
+                    return
+                logger.info("[L2->L3] 检测到 L3 pending，继续补跑: user=%s", user_id)
+        finally:
+            current = self._l3_tasks.get(user_id)
+            if current is asyncio.current_task():
+                self._l3_tasks.pop(user_id, None)
+
+    async def run_l3(self, *, user_id: str) -> None:
+        pipeline = create_l2_to_l3_pipeline_from_settings()
+        if pipeline is None:
+            logger.warning("[L2->L3] L3 pipeline 未配置，跳过: user=%s", user_id)
+            return
+
+        try:
+            logger.info("[L2->L3] 后台任务开始: user=%s", user_id)
+            async with async_db_session() as db:
+                result = await pipeline.run(db, user_id=user_id)
+            logger.info(
+                "[L2->L3] 后台任务完成: user=%s input=%s changed=%s stored=%s skipped=%s latest_cursor=%s memory_id=%s",
+                user_id,
+                result.input_count,
+                result.changed_count,
+                result.stored,
+                result.skipped,
+                result.latest_cursor,
+                result.memory_id,
+            )
+        except Exception:
+            logger.exception("[L2->L3] 后台任务失败: user=%s", user_id)
 
 
 pipeline_scheduler = PipelineScheduler()

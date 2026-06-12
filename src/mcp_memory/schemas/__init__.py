@@ -10,6 +10,9 @@ from .memory_items import (
     L1ToL2Result,
     L2SceneCreate,
     L2SceneRow,
+    L2ToL3Result,
+    L3PersonaCreate,
+    L3PersonaRow,
     MemoryItemCreate,
 )
 
@@ -25,5 +28,8 @@ __all__ = [
     "L1MemorySearchResult",
     "L2SceneCreate",
     "L2SceneRow",
+    "L2ToL3Result",
+    "L3PersonaCreate",
+    "L3PersonaRow",
     "MemoryItemCreate",
 ]

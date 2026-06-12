@@ -33,8 +33,10 @@ memory:
     dedup: true
 
   persona:
+    enabled: true
     triggerEveryN: 50
     maxScenes: 15
+    maxLength: 2000
 
   pipeline:
     everyNConversations: 5

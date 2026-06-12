@@ -15,6 +15,9 @@ __all__ = [
     "L1ToL2Result",
     "L2SceneCreate",
     "L2SceneRow",
+    "L2ToL3Result",
+    "L3PersonaCreate",
+    "L3PersonaRow",
     "MemoryItemCreate",
 ]
 
@@ -169,6 +172,28 @@ class L2SceneCreate(BaseModel):
     updated_at: datetime
 
 
+class L3PersonaRow(BaseModel):
+    """One active L3 persona stored in memory_items."""
+
+    memory_id: str
+    user_id: str
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class L3PersonaCreate(BaseModel):
+    """Payload for creating or updating one DB-native L3 persona."""
+
+    memory_id: str
+    user_id: str
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
 class L1ToL2Result(BaseModel):
     """Result of one L1 to L2 pipeline run."""
 
@@ -178,6 +203,17 @@ class L1ToL2Result(BaseModel):
     latest_cursor: datetime | None = None
     scene_id: str | None = None
     scene_name: str | None = None
+
+
+class L2ToL3Result(BaseModel):
+    """Result of one L2 to L3 pipeline run."""
+
+    input_count: int
+    changed_count: int
+    stored: bool = False
+    skipped: bool = False
+    latest_cursor: datetime | None = None
+    memory_id: str | None = None
 
 
 class L0ToL1Result(BaseModel):

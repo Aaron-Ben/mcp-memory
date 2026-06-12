@@ -12,6 +12,8 @@ from mcp_memory.schemas.memory_items import (
     L1MemorySearchResult,
     L2SceneCreate,
     L2SceneRow,
+    L3PersonaCreate,
+    L3PersonaRow,
     MemoryItemCreate,
 )
 
@@ -419,6 +421,137 @@ class MemoryItemRepository:
             )
         return scenes
 
+    async def query_l2_for_l3(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str,
+        updated_after: datetime | None = None,
+        limit: int = 50,
+    ) -> list[L2SceneRow]:
+        """Query active L2 scenes changed after the current L3 persona."""
+
+        params: dict[str, object] = {
+            "user_id": user_id,
+            "limit": limit,
+        }
+        updated_filter = ""
+        if updated_after is not None:
+            updated_filter = "AND updated_at > :updated_after"
+            params["updated_after"] = updated_after
+
+        result = await db.execute(
+            text(
+                f"""
+                SELECT
+                    memory_id,
+                    user_id,
+                    scene_name,
+                    content,
+                    metadata,
+                    created_at,
+                    updated_at
+                FROM memory_items
+                WHERE layer = 2
+                  AND memory_type = 'scene_block'
+                  AND status = 'active'
+                  AND is_deleted = false
+                  AND user_id = :user_id
+                  {updated_filter}
+                ORDER BY updated_at ASC
+                LIMIT :limit
+                """
+            ),
+            params,
+        )
+        return [self._l2_scene_from_row(row) for row in result.mappings().all()]
+
+    async def query_all_l2_scenes_for_l3(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str,
+        limit: int = 15,
+    ) -> list[L2SceneRow]:
+        """Query active L2 scenes used as L3 persona evidence and navigation index."""
+
+        return await self.query_l2_scenes(db, user_id=user_id, limit=limit)
+
+    async def get_l3_persona(self, db: AsyncSession, *, user_id: str) -> L3PersonaRow | None:
+        """Get the active DB-native L3 persona for one user."""
+
+        result = await db.execute(
+            text(
+                """
+                SELECT
+                    memory_id,
+                    user_id,
+                    content,
+                    metadata,
+                    created_at,
+                    updated_at
+                FROM memory_items
+                WHERE layer = 3
+                  AND memory_type = 'persona'
+                  AND status = 'active'
+                  AND is_deleted = false
+                  AND user_id = :user_id
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """
+            ),
+            {"user_id": user_id},
+        )
+        row = result.mappings().first()
+        if row is None:
+            return None
+        return L3PersonaRow(
+            memory_id=str(row["memory_id"]),
+            user_id=str(row["user_id"]),
+            content=str(row["content"] or ""),
+            metadata=dict(row["metadata"] or {}),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    async def upsert_l3_persona(self, db: AsyncSession, *, obj_in: L3PersonaCreate) -> None:
+        """Insert or update one DB-native L3 persona."""
+
+        data = obj_in.model_dump()
+        metadata = dict(data["metadata"])
+        metadata["filename"] = metadata.get("filename") or "persona.md"
+        await db.execute(
+            text(
+                """
+                INSERT INTO memory_items (
+                    memory_id, user_id, layer, memory_type, content, embedding,
+                    priority, scene_name, source_conversation_id, source_session_key,
+                    metadata, status, created_at, updated_at
+                ) VALUES (
+                    :memory_id, :user_id, 3, 'persona', :content, NULL,
+                    50, 'persona', '', '',
+                    CAST(:metadata_json AS jsonb), 'active', :created_at, :updated_at
+                )
+                ON CONFLICT (memory_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    metadata = EXCLUDED.metadata,
+                    status = 'active',
+                    is_deleted = false,
+                    deleted_at = NULL,
+                    updated_at = EXCLUDED.updated_at
+                """
+            ),
+            {
+                "memory_id": data["memory_id"],
+                "user_id": data["user_id"],
+                "content": data["content"],
+                "metadata_json": json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
+                "created_at": data["created_at"],
+                "updated_at": data["updated_at"],
+            },
+        )
+        await db.flush()
+
     async def upsert_l2_scene(self, db: AsyncSession, *, obj_in: L2SceneCreate) -> None:
         """Insert or update one DB-native L2 scene block."""
 
@@ -462,6 +595,21 @@ class MemoryItemRepository:
             },
         )
         await db.flush()
+
+    def _l2_scene_from_row(self, row) -> L2SceneRow:
+        metadata = dict(row["metadata"] or {})
+        scene_name = str(row["scene_name"] or "")
+        filename = str(metadata.get("filename") or self._scene_filename(scene_name))
+        return L2SceneRow(
+            memory_id=str(row["memory_id"]),
+            user_id=str(row["user_id"]),
+            filename=filename,
+            scene_name=scene_name,
+            content=str(row["content"] or ""),
+            metadata=metadata,
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     def _l0_time_ms_expr(self) -> str:
         return "COALESCE(NULLIF(metadata->>'message_ts_ms', '')::double precision, EXTRACT(EPOCH FROM created_at) * 1000)"
