@@ -47,6 +47,8 @@ L0 保存当前做的事：
 - 更复杂的多阶段候选过滤和冲突策略。
 - 分布式 worker / 多进程任务队列。
 
+更完整的 L0->L1 未实现项清单见 [L0 到 L1 未实现项](./l0-to-l1-missing.md)。
+
 ## yuanxi-memory 参考流程
 
 `yuanxi-memory` 中 L0 -> L1 不是在 gRPC 请求里同步完成，而是异步 pipeline。
@@ -379,7 +381,8 @@ l1_ + sha256(user_id + source_l0_ids + extractor_version + normalized_content)
 - 相似 L1 的 FTS fallback。
 - 更细粒度的多阶段候选过滤。
 - 分布式 pipeline job 状态表或 pending job 记录。
-- L1 -> L2 聚合触发。
+
+完整缺口和建议优先级见 [L0 到 L1 未实现项](./l0-to-l1-missing.md)。
 
 ## 和当前代码的差距
 
@@ -402,5 +405,8 @@ l1_ + sha256(user_id + source_l0_ids + extractor_version + normalized_content)
 当前仍缺失：
 
 - L1 去重的 FTS fallback。
-- L1 -> L2 聚合触发。
-- L2 / L3 pipeline。
+- 失败重试、shutdown flush、stale running 恢复。
+- LLM 输出后的二次质量校验。
+- 时间 metadata 的结构化使用。
+
+完整清单见 [L0 到 L1 未实现项](./l0-to-l1-missing.md)。L1 -> L2、L2 / L3 pipeline 属于后续分层链路，不归入本文的 L0->L1 缺口。

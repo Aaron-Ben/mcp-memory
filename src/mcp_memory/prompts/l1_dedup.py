@@ -35,24 +35,44 @@ def build_l1_dedup_prompt(
         }
         for candidate in pool.values()
     ]
-    new_payload = [
-        {
+    if pool_payload:
+        pool_section = f"## 统一候选记忆池（共 {len(pool_payload)} 条已有记忆）\n\n" + json.dumps(
+            pool_payload,
+            ensure_ascii=False,
+            indent=2,
+        )
+    else:
+        pool_section = "## 统一候选记忆池\n\n（空，没有已有记忆，所有新记忆直接 store）"
+
+    memory_sections = []
+    for idx, (record_id, memory, _candidates) in enumerate(matches, start=1):
+        related_ids = related_by_record_id.get(record_id, [])
+        memory_payload = {
             "record_id": record_id,
             "content": memory.content,
             "type": memory.memory_type,
             "priority": memory.priority,
             "scene_name": memory.scene_name,
-            "related_candidate_ids": related_by_record_id.get(record_id, []),
         }
-        for record_id, memory, _candidates in matches
-    ]
+        related_note = json.dumps(related_ids, ensure_ascii=False) if related_ids else "[]（无相似候选，直接 store）"
+        memory_sections.append(
+            "\n".join(
+                [
+                    f"### 第 {idx} 条新记忆 (record_id: {record_id})",
+                    json.dumps(memory_payload, ensure_ascii=False, indent=2),
+                    "",
+                    f"【关联候选 ID】{related_note}",
+                ]
+            )
+        )
 
     return "\n\n".join(
         [
-            "## 统一候选记忆池",
-            json.dumps(pool_payload, ensure_ascii=False, indent=2),
-            "## 待判断的新记忆",
-            json.dumps(new_payload, ensure_ascii=False, indent=2),
+            "输出语言：`merged_content` 使用与候选池中已有记忆相同的语言。",
+            pool_section,
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"## 待判断的新记忆（共 {len(matches)} 条）",
+            "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n".join(memory_sections),
             "请逐条判断并输出决策 JSON 数组。候选列表为空的新记忆直接输出 action=store。",
         ]
     )
