@@ -11,6 +11,10 @@ __all__ = [
     "L1MemoryDedupDecision",
     "L1MemoryExtracted",
     "L1MemorySearchResult",
+    "L1MemoryForL2",
+    "L1ToL2Result",
+    "L2SceneCreate",
+    "L2SceneRow",
     "MemoryItemCreate",
 ]
 
@@ -119,6 +123,61 @@ class L1MemoryDedupDecision(BaseModel):
     merged_content: str | None = None
     merged_type: Literal["persona", "episodic", "instruction"] | None = None
     merged_priority: int | None = None
+
+
+class L1MemoryForL2(BaseModel):
+    """One active L1 memory used as input for L2 scene generation."""
+
+    memory_id: str
+    user_id: str
+    memory_type: str
+    content: str
+    priority: int
+    scene_name: str
+    source_conversation_id: str
+    source_session_key: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class L2SceneRow(BaseModel):
+    """One active L2 scene block stored in memory_items."""
+
+    memory_id: str
+    user_id: str
+    filename: str
+    scene_name: str
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class L2SceneCreate(BaseModel):
+    """Payload for creating or updating one L2 DB-native scene block."""
+
+    memory_id: str
+    user_id: str
+    filename: str
+    scene_name: str
+    content: str
+    source_conversation_id: str = ""
+    source_session_key: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class L1ToL2Result(BaseModel):
+    """Result of one L1 to L2 pipeline run."""
+
+    input_count: int
+    stored_count: int
+    skipped: bool = False
+    latest_cursor: datetime | None = None
+    scene_id: str | None = None
+    scene_name: str | None = None
 
 
 class L0ToL1Result(BaseModel):

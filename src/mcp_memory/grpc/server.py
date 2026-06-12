@@ -9,7 +9,7 @@ from mcp_memory.config import settings
 from mcp_memory.db import check_db_health
 from mcp_memory.grpc.memory_service import MemoryService
 from mcp_memory.proto import memory_pb2_grpc
-from mcp_memory.services import pipeline_scheduler
+from mcp_memory.services.pipeline_scheduler import pipeline_scheduler
 
 __all__ = ["serve"]
 

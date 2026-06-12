@@ -55,14 +55,14 @@ mcp-memory/
     ├── models/                     # SQLAlchemy 表模型
     │   ├── base.py                 # Base、时间字段、软删除公共字段
     │   ├── memory_items.py         # memory_items 记忆表
-    │   ├── pipeline_state.py       # L0->L1 调度状态表
+    │   ├── pipeline_state.py       # L0->L1/L1->L2 调度状态表
     │   └── switch.py               # memory_switch 开关表
-    ├── pipelines/                  # 后台记忆分层流水线，如 L0->L1
+    ├── pipelines/                  # 后台记忆分层流水线，如 L0->L1、L1->L2
     ├── schemas/                    # Pydantic 入参/数据传输结构
     ├── repositories/               # 数据库读写层，封装 SQL/ORM 持久化操作
     ├── services/                   # 业务逻辑层，如 L0 保存、L1 写入、pipeline 调度
     ├── prompts/                    # Markdown 提示词与 PromptLoader
-    │   └── modules/                # 功能模块提示词，如 L1 抽取 prompt
+    │   └── modules/                # 功能模块提示词，如 L1 抽取、L2 场景 prompt
     ├── grpc/                       # gRPC 服务端实现
     │   ├── server.py               # gRPC server 启动与端口监听
     │   └── memory_service.py       # Memory service RPC 实现
@@ -86,6 +86,9 @@ mcp-client
   -> PostgreSQL pipeline_state
   -> mcp_memory.pipelines.l0_to_l1.L0ToL1Pipeline
   -> PostgreSQL memory_items(layer = 1)
+  -> L2 timer
+  -> mcp_memory.pipelines.l1_to_l2.L1ToL2Pipeline
+  -> PostgreSQL memory_items(layer = 2)
 ```
 
 分层职责：
@@ -93,8 +96,8 @@ mcp-client
 - `models`: 定义数据库表结构。
 - `schemas`: 定义服务内部入参和数据传输结构，不直接访问数据库。
 - `repositories`: 只处理数据库读写，避免混入业务规则。
-- `services`: 处理业务规则和流程编排，例如 L0 消息过滤、`memory_id` 生成、metadata 构造、L1 后台调度。
-- `pipelines`: 执行跨层流水线，例如从 L0 查询增量消息、调用 LLM 抽取 L1、推进 cursor。
+- `services`: 处理业务规则和流程编排，例如 L0 消息过滤、`memory_id` 生成、metadata 构造、后台调度。
+- `pipelines`: 执行跨层流水线，例如从 L0 查询增量消息、调用 LLM 抽取 L1、把 L1 整合为 L2、推进 cursor。
 - `grpc`: 对外提供 gRPC 接口，负责协议转换和调用 service。
 - `proto`: 保存协议定义及生成代码。修改 `memory.proto` 后需要重新生成 `*_pb2*` 文件。
 

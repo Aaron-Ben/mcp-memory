@@ -9,7 +9,8 @@ import grpc
 from mcp_memory.db import async_db_session
 from mcp_memory.proto import memory_pb2, memory_pb2_grpc
 from mcp_memory.schemas import L0MessageCreate
-from mcp_memory.services import l0_memory_service, pipeline_scheduler
+from mcp_memory.services import l0_memory_service
+from mcp_memory.services.pipeline_scheduler import pipeline_scheduler
 
 __all__ = ["MemoryService"]
 

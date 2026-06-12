@@ -44,6 +44,7 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
     capture = _as_dict(memory.get("capture"))
     extraction = _as_dict(memory.get("extraction"))
     l1 = _as_dict(memory.get("l1"))
+    persona = _as_dict(memory.get("persona"))
     pipeline = _as_dict(memory.get("pipeline"))
     embedding = _as_dict(memory.get("embedding"))
 
@@ -74,6 +75,10 @@ def _load_yaml_settings(path: Path = CONFIG_PATH) -> dict[str, Any]:
     _set_if_present(values, "PIPELINE_EVERY_N_CONVERSATIONS", pipeline.get("everyNConversations"))
     _set_if_present(values, "PIPELINE_ENABLE_WARMUP", pipeline.get("enableWarmup"))
     _set_if_present(values, "PIPELINE_L1_IDLE_TIMEOUT_SECONDS", pipeline.get("l1IdleTimeoutSeconds"))
+    _set_if_present(values, "PIPELINE_L2_DELAY_AFTER_L1_SECONDS", pipeline.get("l2DelayAfterL1Seconds"))
+    _set_if_present(values, "PIPELINE_L2_MIN_INTERVAL_SECONDS", pipeline.get("l2MinIntervalSeconds"))
+    _set_if_present(values, "PIPELINE_L2_MAX_INTERVAL_SECONDS", pipeline.get("l2MaxIntervalSeconds"))
+    _set_if_present(values, "MEMORY_MAX_SCENES", persona.get("maxScenes"))
 
     _set_if_present(values, "EMBEDDING_ENABLED", embedding.get("enabled"))
     _set_if_present(values, "EMBEDDING_API_KEY", embedding.get("apiKey"))
@@ -116,6 +121,10 @@ class Settings(BaseModel):
     PIPELINE_EVERY_N_CONVERSATIONS: int = 5
     PIPELINE_ENABLE_WARMUP: bool = True
     PIPELINE_L1_IDLE_TIMEOUT_SECONDS: int = 600
+    PIPELINE_L2_DELAY_AFTER_L1_SECONDS: int = 90
+    PIPELINE_L2_MIN_INTERVAL_SECONDS: int = 900
+    PIPELINE_L2_MAX_INTERVAL_SECONDS: int = 3600
+    MEMORY_MAX_SCENES: int = 15
 
     EMBEDDING_ENABLED: bool = True
     EMBEDDING_API_KEY: str | None = None
